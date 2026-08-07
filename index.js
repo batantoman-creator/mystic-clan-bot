@@ -79,6 +79,7 @@ client.once('ready', function () {
 });
 
 client.on('messageCreate', async function (message) {
+  let handled = false;
   try {
     if (message.author.bot) return;
 
@@ -98,6 +99,8 @@ client.on('messageCreate', async function (message) {
     if (usedPrefix) content = content.slice(PREFIX.length).trim();
     if (!content) return;
 
+    handled = true;
+
     if (message.reference) {
       try {
         const refMsg = await message.channel.messages.fetch(message.reference.messageId);
@@ -107,6 +110,57 @@ client.on('messageCreate', async function (message) {
       } catch (e) {}
     }
 
+    await message.channel.sendTyping();
+
+    const searchResults = await webSearch(content);
+
+    pushHistory(message.channel.id, 'user', message.author.username + ': ' + content);
+
+    const messagesToSend = [
+      { role: 'system', content: SYSTEM_PROMPT }
+    ];
+
+    if (searchResults) {
+      messagesToSend.push({ role: 'system', content: 'KET QUA TIM KIEM LIEN QUAN DEN CAU HOI:\n' + searchResults });
+    }
+
+    const finalMessages = messagesToSend.concat(getHistory(message.channel.id));
+
+    const completion = await groq.chat.completions.create({
+      model: 'openai/gpt-oss-120b',
+      messages: finalMessages,
+      max_tokens: 300,
+      temperature: 0.6
+    });
+
+    const reply = completion.choices && completion.choices[0] && completion.choices[0].message
+      ? completion.choices[0].message.content.trim()
+      : null;
+
+    if (reply) {
+      await message.reply(reply.slice(0, 2000));
+      pushHistory(message.channel.id, 'assistant', reply);
+    } else {
+      await message.reply('Xin loi, minh chua nghi ra cau tra loi. Ban thu hoi lai cau khac nhe.');
+    }
+  } catch (err) {
+    console.error('Loi xu ly tin nhan:', err);
+    if (handled) {
+      try {
+        await message.reply('Minh dang gap loi ky thuat, ban thu lai sau vai giay nhe.');
+      } catch (e2) {
+        console.error('Khong the gui tin nhan loi:', e2);
+      }
+    }
+  }
+});
+
+client.login(process.env.DISCORD_TOKEN);
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', function (req, res) { res.send('Bot dang chay!'); });
+app.listen(PORT, function () { console.log('Web server chay o port ' + PORT); });
     await message.channel.sendTyping();
 
     const searchResults = await webSearch(content);
