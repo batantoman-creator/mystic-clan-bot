@@ -16,15 +16,16 @@ const client = new Client({
 
 const CLAN_INFO = 'Ten clan: Mystic Clan. Leader: Neil va Hieu. Co-leader/Admin: Hiroshims. Rule: [DIEN RULE CLAN NEU CO]. Thong tin khac: [DIEN THEM NEU CAN].';
 
-const SYSTEM_PROMPT = 'Ban la "Mystic bot", tro ly AI cua clan "Mystic Clan" tren Discord.\n\n' +
+const SYSTEM_PROMPT = 'Ban la "Mystic bot", tro ly AI cua clan "Mystic Clan" tren Discord, co kha nang tra cuu thong tin moi tu internet.\n\n' +
   'THONG TIN VE CLAN (chi dung khi duoc hoi ve clan):\n' + CLAN_INFO + '\n\n' +
   'QUY TAC TRA LOI:\n' +
   '1. Doc ky va tra loi DUNG TRONG TAM cau hoi. Khong lan man, khong vong vo.\n' +
-  '2. Voi cau hoi kien thuc chung, doi song, hoc tap, tam su, chit-chat: tra loi binh thuong, tu nhien, than thien nhu mot nguoi ban.\n' +
-  '3. Neu duoc hoi thong tin ve clan ma khong co trong phan THONG TIN VE CLAN o tren, hay noi thang la ban chua co thong tin do, khong duoc bia dat.\n' +
-  '4. Xung "minh" hoac "to", goi nguoi dung la "ban", giong dieu lich su, than thien, vui ve.\n' +
-  '5. Tra loi ngan gon, khong qua 3 cau, tru khi nguoi dung yeu cau giai thich chi tiet.\n' +
-  '6. Khong dung markdown trong cau tra loi.';
+  '2. Neu tin nhan he thong co phan "KET QUA TIM KIEM", hay doc ky va dung thong tin do de tra loi chinh xac, cap nhat, khong bia dat them. Tong hop lai bang loi van tu nhien cua ban, khong copy nguyen van.\n' +
+  '3. Neu khong co KET QUA TIM KIEM hoac ket qua khong lien quan, hay tra loi bang kien thuc san co cua ban mot cach binh thuong.\n' +
+  '4. Neu duoc hoi thong tin ve clan ma khong co trong phan THONG TIN VE CLAN o tren, hay noi thang la ban chua co thong tin do, khong duoc bia dat.\n' +
+  '5. Xung "minh" hoac "to", goi nguoi dung la "ban", giong dieu lich su, than thien, vui ve.\n' +
+  '6. Tra loi ngan gon, khong qua 4 cau, tru khi nguoi dung yeu cau giai thich chi tiet.\n' +
+  '7. Khong dung markdown trong cau tra loi.';
 
 const PREFIX = '>bot';
 const KEYWORD = /\bbot\b/i;
@@ -44,6 +45,33 @@ function pushHistory(channelId, role, content) {
   const arr = getHistory(channelId);
   arr.push({ role: role, content: content });
   if (arr.length > MAX_HISTORY) arr.shift();
+}
+
+async function webSearch(query) {
+  if (!process.env.SERPER_API_KEY) return '';
+  try {
+    const response = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: {
+        'X-API-KEY': process.env.SERPER_API_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ q: query, gl: 'vn', hl: 'vi' })
+    });
+    const data = await response.json();
+    if (!data.organic || data.organic.length === 0) return '';
+    const top = data.organic.slice(0, 4);
+    let text = '';
+    for (let i = 0; i < top.length; i++) {
+      const title = top[i].title || '';
+      const snippet = top[i].snippet || '';
+      text = text + (i + 1) + '. ' + title + ': ' + snippet + '\n';
+    }
+    return text;
+  } catch (e) {
+    console.error('Loi tim kiem web:', e);
+    return '';
+  }
 }
 
 client.once('ready', function () {
@@ -81,14 +109,24 @@ client.on('messageCreate', async function (message) {
 
     await message.channel.sendTyping();
 
+    const searchResults = await webSearch(content);
+
     pushHistory(message.channel.id, 'user', message.author.username + ': ' + content);
+
+    const messagesToSend = [
+      { role: 'system', content: SYSTEM_PROMPT }
+    ];
+
+    if (searchResults) {
+      messagesToSend.push({ role: 'system', content: 'KET QUA TIM KIEM LIEN QUAN DEN CAU HOI:\n' + searchResults });
+    }
+
+    const finalMessages = messagesToSend.concat(getHistory(message.channel.id));
 
     const completion = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT }
-      ].concat(getHistory(message.channel.id)),
-      max_tokens: 250,
+      messages: finalMessages,
+      max_tokens: 300,
       temperature: 0.6
     });
 
