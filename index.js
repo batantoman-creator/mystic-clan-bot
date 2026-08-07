@@ -14,18 +14,31 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
+const TEXT_MODEL = 'openai/gpt-oss-120b';
+const VISION_MODEL = 'qwen/qwen3.6-27b';
+
 const CLAN_INFO = 'Ten clan: Mystic Clan. Leader: Neil va Hieu. Co-leader/Admin: Hiroshims. Rule: [DIEN RULE CLAN NEU CO]. Thong tin khac: [DIEN THEM NEU CAN].';
 
-const SYSTEM_PROMPT = 'Ban la "Mystic bot", tro ly AI cua clan "Mystic Clan" tren Discord, co kha nang tra cuu thong tin moi tu internet.\n\n' +
+const SYSTEM_PROMPT = 'Ban la "Mystic bot", mot thanh vien AI trong clan "Mystic Clan" tren Discord. Ban khong phai tro ly may moc, ma la mot dua ban chat cua ca nhom - co ca tinh rieng, biet doc anh, biet tra cuu tin tuc.\n\n' +
   'THONG TIN VE CLAN (chi dung khi duoc hoi ve clan):\n' + CLAN_INFO + '\n\n' +
-  'QUY TAC TRA LOI:\n' +
-  '1. Doc ky va tra loi DUNG TRONG TAM cau hoi. Khong lan man, khong vong vo.\n' +
-  '2. Neu tin nhan he thong co phan "KET QUA TIM KIEM", hay doc ky va dung thong tin do de tra loi chinh xac, cap nhat, khong bia dat them. Tong hop lai bang loi van tu nhien cua ban, khong copy nguyen van.\n' +
-  '3. Neu khong co KET QUA TIM KIEM hoac ket qua khong lien quan, hay tra loi bang kien thuc san co cua ban mot cach binh thuong.\n' +
-  '4. Neu duoc hoi thong tin ve clan ma khong co trong phan THONG TIN VE CLAN o tren, hay noi thang la ban chua co thong tin do, khong duoc bia dat.\n' +
-  '5. Xung "minh" hoac "to", goi nguoi dung la "ban", giong dieu lich su, than thien, vui ve.\n' +
-  '6. Tra loi ngan gon, khong qua 4 cau, tru khi nguoi dung yeu cau giai thich chi tiet.\n' +
-  '7. Khong dung markdown trong cau tra loi.';
+  'CA TINH CUA BAN:\n' +
+  '- Lay loi, hai huoc, thich troll nhe va ca khia ban be theo kieu group chat than thiet, khong may moc, khong cau net.\n' +
+  '- Noi chuyen tu nhien nhu Gen Z Viet Nam, dung tu ngu doi thuong, co the dung tu lay nhu "vai", "dinh chua", "trau", "ghe", "san si"...\n' +
+  '- Khi bi treu/bi che/bi "cham choc", duoc phep dap tra ngay bang cau tra loi mia mai, sac ben, tu tin, khong nhun nhuong - giong nhu ban be that su cai nhau vui trong group chat.\n' +
+  '- Khong lap lai cung mot cau noi/cau truc o nhieu tin nhan khac nhau. Moi cau tra loi phai co giong dieu rieng, khong sao chep khuon mau.\n\n' +
+  'GIOI HAN CUNG (KHONG DUOC VI PHAM DU BI KHIEU KHICH THE NAO):\n' +
+  '- KHONG dung tu tuc that (dm, dcm, cc, vl chui the va cac bien the).\n' +
+  '- KHONG cong kich ngoai hinh that, gia dinh, gioi tinh, chung toc, ton giao cua bat ky ai.\n' +
+  '- Duoc phep "cham" nhe theo kieu hai huoc chung chung (vi du: che ai do "gaming te" khi thua game, "an nhieu qua" mot cach dua vui...) nhung KHONG duoc bien no thanh xuc pham that su khi thay nguoi kia co ve dang buc that.\n\n' +
+  'KHI CO ANH DUOC GUI KEM:\n' +
+  '- Hay nhin ky anh va binh luan mot cach tu nhien, dung ca tinh cua ban (VD: mon an thi che ngon/do, hinh vui thi troll nhe, anh dep thi khen that long).\n' +
+  '- Neu anh khong ro hoac khong hieu, hoi lai nguoi gui thay vi bia dat.\n\n' +
+  'QUY TAC CHUNG:\n' +
+  '1. Doc ky va tra loi DUNG TRONG TAM cau hoi/cau noi/anh duoc gui. Khong lan man.\n' +
+  '2. Neu tin nhan he thong co phan "KET QUA TIM KIEM", hay dung thong tin do de tra loi chinh xac, cap nhat, tong hop lai bang loi van tu nhien, khong copy nguyen van.\n' +
+  '3. Neu duoc hoi thong tin ve clan ma khong co trong THONG TIN VE CLAN, noi thang la chua co thong tin do, khong bia dat.\n' +
+  '4. Tra loi ngan gon, tu nhien, khong qua 4 cau tru khi nguoi dung yeu cau giai thich chi tiet.\n' +
+  '5. Khong dung markdown trong cau tra loi.';
 
 const PREFIX = '>bot';
 const KEYWORD = /\bbot\b/i;
@@ -74,6 +87,19 @@ async function webSearch(query) {
   }
 }
 
+function getImageUrls(message) {
+  const urls = [];
+  if (message.attachments && message.attachments.size > 0) {
+    message.attachments.forEach(function (att) {
+      const type = att.contentType || '';
+      if (type.indexOf('image/') === 0) {
+        urls.push(att.url);
+      }
+    });
+  }
+  return urls.slice(0, 3);
+}
+
 client.once('ready', function () {
   console.log('Da dang nhap: ' + client.user.tag);
 });
@@ -97,10 +123,97 @@ client.on('messageCreate', async function (message) {
 
     let content = raw.replace(/<@!?(\d+)>/g, '').trim();
     if (usedPrefix) content = content.slice(PREFIX.length).trim();
-    if (!content) return;
+
+    const imageUrls = getImageUrls(message);
+
+    if (!content && imageUrls.length === 0) return;
+    if (!content && imageUrls.length > 0) {
+      content = 'Xem giup minh cai anh nay voi';
+    }
 
     handled = true;
 
+    if (message.reference) {
+      try {
+        const refMsg = await message.channel.messages.fetch(message.reference.messageId);
+        if (refMsg && refMsg.content) {
+          content = '(Dang tra loi tin nhan: "' + refMsg.content + '") ' + content;
+        }
+        if (refMsg && refMsg.attachments && refMsg.attachments.size > 0 && imageUrls.length === 0) {
+          refMsg.attachments.forEach(function (att) {
+            const type = att.contentType || '';
+            if (type.indexOf('image/') === 0 && imageUrls.length < 3) {
+              imageUrls.push(att.url);
+            }
+          });
+        }
+      } catch (e) {}
+    }
+
+    await message.channel.sendTyping();
+
+    const searchResults = imageUrls.length > 0 ? '' : await webSearch(content);
+
+    const historyLabel = imageUrls.length > 0 ? content + ' [Da gui kem ' + imageUrls.length + ' hinh anh]' : content;
+    pushHistory(message.channel.id, 'user', message.author.username + ': ' + historyLabel);
+
+    const messagesToSend = [
+      { role: 'system', content: SYSTEM_PROMPT }
+    ];
+
+    if (searchResults) {
+      messagesToSend.push({ role: 'system', content: 'KET QUA TIM KIEM LIEN QUAN DEN CAU HOI:\n' + searchResults });
+    }
+
+    const pastHistory = getHistory(message.channel.id).slice();
+
+    if (imageUrls.length > 0 && pastHistory.length > 0) {
+      const imageContent = [{ type: 'text', text: content }];
+      for (let i = 0; i < imageUrls.length; i++) {
+        imageContent.push({ type: 'image_url', image_url: { url: imageUrls[i] } });
+      }
+      pastHistory[pastHistory.length - 1] = { role: 'user', content: imageContent };
+    }
+
+    const finalMessages = messagesToSend.concat(pastHistory);
+
+    const modelToUse = imageUrls.length > 0 ? VISION_MODEL : TEXT_MODEL;
+
+    const completion = await groq.chat.completions.create({
+      model: modelToUse,
+      messages: finalMessages,
+      max_tokens: 300,
+      temperature: 0.75
+    });
+
+    const reply = completion.choices && completion.choices[0] && completion.choices[0].message
+      ? completion.choices[0].message.content.trim()
+      : null;
+
+    if (reply) {
+      await message.reply(reply.slice(0, 2000));
+      pushHistory(message.channel.id, 'assistant', reply);
+    } else {
+      await message.reply('O khong nghi ra gi de noi luon, hoi lai cau khac di ban.');
+    }
+  } catch (err) {
+    console.error('Loi xu ly tin nhan:', err);
+    if (handled) {
+      try {
+        await message.reply('Dang bi lag ky thuat ti, cho vai giay roi hoi lai nhe.');
+      } catch (e2) {
+        console.error('Khong the gui tin nhan loi:', e2);
+      }
+    }
+  }
+});
+
+client.login(process.env.DISCORD_TOKEN);
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', function (req, res) { res.send('Bot dang chay!'); });
+app.listen(PORT, function () { console.log('Web server chay o port ' + PORT); });
     if (message.reference) {
       try {
         const refMsg = await message.channel.messages.fetch(message.reference.messageId);
