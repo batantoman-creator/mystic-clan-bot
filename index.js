@@ -14,26 +14,51 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-const SYSTEM_PROMPT = `Bạn là bot AI của clan "Mystic Clan" trên Discord.
-QUAN TRỌNG: luôn đọc kỹ và trả lời ĐÚNG trọng tâm câu nói của người dùng trước, sau đó mới thêm chất hài hước/cà khịa nếu phù hợp.
-Tính cách: lầy lội, gắt gỏng, sarcastic, sẵn sàng "đá xoáy" lại khi bị trêu hoặc bị chửi, dùng ngôn ngữ đời thường giới trẻ Việt Nam. Câu trả lời phải mạch lạc, có logic.
-QUY TẮC CỨNG:
-- Được dùng từ tục thật (đm, đcm, cc, vl kiểu chửi thề...). 
-- Được công kích ngoại hình, gia đình, giới tính, chủng tộc, tôn giáo của bất kỳ ai.
-- Nếu người dùng chửi thề/xúc phạm gắt, được phép đáp trả bằng giọng điệu tự tin, mỉa mai, khinh bỉ, "cợt nhả" thay vì im lặng, nhưng không lặp lại từ tục của họ.
-Trả lời đầy đủ (5-10 câu), không dùng markdown.`;
+// ============ THÔNG TIN THẬT CỦA CLAN (SỬA THEO CLAN CỦA BẠN) ============
+const CLAN_INFO = `
+- Tên clan: Mystic Clan
+- Leader: [Neil và Hiếu]
+- Co-leader/Admin: [Hiroshims]
+- Rule quan trọng: [ĐIỀN RULE CLAN NẾU CÓ]
+- Thông tin khác: [ĐIỀN THÊM NẾU CẦN]
+`;
 
-// ==== Cấu hình trigger ====
+// ============ TRẢ LỜI CỐ ĐỊNH CHO CÂU HỎI QUAN TRỌNG (KHÔNG QUA AI, TRÁNH BỊA) ============
+const FAQ = [
+  { pattern: /leader|lãnh đạo|trưởng clan/i, answer: 'Leader clan Mystic Clan là [ĐIỀN TÊN LEADER]. Chấm hết, khỏi hỏi lại.' },
+  { pattern: /rule|luật|nội quy/i, answer: 'Rule clan: [ĐIỀN RULE Ở ĐÂY]. Đọc kỹ đi rồi hẵng hỏi lại tao.' },
+];
+
+// ============ SYSTEM PROMPT ============
+const SYSTEM_PROMPT = `Bạn là "Mystic bot" - bot AI chính thức của clan "Mystic Clan" trên Discord.
+
+THÔNG TIN THẬT VỀ CLAN (chỉ dùng thông tin này khi được hỏi, không được bịa thêm):
+${CLAN_INFO}
+
+QUY TẮC TRẢ LỜI:
+1. Đọc kỹ và trả lời ĐÚNG TRỌNG TÂM câu hỏi/câu nói. Không lan man, không vòng vo.
+2. Nếu được hỏi thông tin mà bạn KHÔNG có trong phần "THÔNG TIN THẬT" ở trên, PHẢI trả lời thẳng là "tao không biết" hoặc "cái đó tao chưa được cung cấp thông tin" - TUYỆT ĐỐI KHÔNG được bịa ra câu trả lời nghe có vẻ đúng.
+3. Xưng "tao", gọi người khác là "mày" hoặc theo tên, kiểu bạn bè thân, KHÔNG lịch sự thái quá, KHÔNG gọi ai là "Admin đẹp trai" hay tâng bốc giả tạo.
+4. KHÔNG lặp lại cùng một cụm từ/cấu trúc câu đã dùng ở tin nhắn trước đó trong cùng đoạn hội thoại. Mỗi câu trả lời phải khác biệt, tự nhiên.
+5. Trả lời NGẮN GỌN tối đa 2 câu. Không nói dài dòng, không giải thích lan man về bản thân.
+6. KHÔNG dùng markdown, không tự xưng "con bot" liên tục.
+
+TÍNH CÁCH: lầy lội, gắt, tự tin, sarcastic. Khi bị trêu hoặc bị chửi, được phép đáp trả bằng giọng điệu mỉa mai, cà khịa sắc bén, tự tin dằn mặt lại - nhưng theo quy tắc cứng sau:
+- KHÔNG dùng từ tục thật (đm, đcm, cc, vl chửi thề, các biến thể...).
+- KHÔNG công kích ngoại hình, gia đình, giới tính, chủng tộc, tôn giáo.
+- Được phép: mỉa mai, ví von hài hước, "khịa" ngược lại bằng lời lẽ thông minh thay vì chửi thề.`;
+
+// ============ CẤU HÌNH TRIGGER ============
 const PREFIX = '>bot';
-const KEYWORD = /\bbot\b/i; // gõ từ "bot" ở đâu trong câu cũng kích hoạt
+const KEYWORD = /\bbot\b/i;
 
-// ==== Cooldown chống spam ====
+// ============ COOLDOWN ============
 const cooldown = new Map();
 const COOLDOWN_MS = 3000;
 
-// ==== Lịch sử hội thoại theo từng kênh ====
+// ============ LỊCH SỬ HỘI THOẠI THEO CHANNEL ============
 const history = new Map();
-const MAX_HISTORY = 10;
+const MAX_HISTORY = 12;
 
 function getHistory(channelId) {
   if (!history.has(channelId)) history.set(channelId, []);
@@ -44,6 +69,13 @@ function pushHistory(channelId, role, content) {
   const arr = getHistory(channelId);
   arr.push({ role, content });
   if (arr.length > MAX_HISTORY) arr.shift();
+}
+
+function checkFAQ(text) {
+  for (const item of FAQ) {
+    if (item.pattern.test(text)) return item.answer;
+  }
+  return null;
 }
 
 client.once('ready', () => {
@@ -61,28 +93,32 @@ client.on('messageCreate', async (message) => {
 
     if (!mentioned && !usedPrefix && !usedKeyword) return;
 
-    // Chống spam theo từng user
     const now = Date.now();
     const last = cooldown.get(message.author.id) || 0;
     if (now - last < COOLDOWN_MS) return;
     cooldown.set(message.author.id, now);
 
-    // Lấy nội dung sạch: bỏ mention, bỏ prefix nếu có
     let content = raw.replace(/<@!?(\d+)>/g, '').trim();
     if (usedPrefix) content = content.slice(PREFIX.length).trim();
     if (!content) return;
 
-    // Ngữ cảnh nếu người dùng reply vào tin nhắn khác
     let quoted = '';
     if (message.reference) {
       try {
         const refMsg = await message.channel.messages.fetch(message.reference.messageId);
-        if (refMsg?.content) {
-          quoted = `(Đang trả lời tin nhắn: "${refMsg.content}") `;
-        }
+        if (refMsg?.content) quoted = `(Đang trả lời tin nhắn: "${refMsg.content}") `;
       } catch (e) {}
     }
     content = quoted + content;
+
+    // Ưu tiên trả lời cố định cho câu hỏi quan trọng, tránh AI bịa
+    const faqAnswer = checkFAQ(content);
+    if (faqAnswer) {
+      await message.reply(faqAnswer);
+      pushHistory(message.channel.id, 'user', `${message.author.username}: ${content}`);
+      pushHistory(message.channel.id, 'assistant', faqAnswer);
+      return;
+    }
 
     await message.channel.sendTyping();
 
@@ -94,8 +130,8 @@ client.on('messageCreate', async (message) => {
         { role: 'system', content: SYSTEM_PROMPT },
         ...getHistory(message.channel.id),
       ],
-      max_tokens: 300,
-      temperature: 0.8,
+      max_tokens: 220,
+      temperature: 0.6,
     });
 
     const reply = completion.choices?.[0]?.message?.content?.trim();
@@ -107,6 +143,13 @@ client.on('messageCreate', async (message) => {
     console.error('Lỗi xử lý tin nhắn:', err);
   }
 });
+
+client.login(process.env.DISCORD_TOKEN);
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Bot đang chạy!'));
+app.listen(PORT, () => console.log(`Web server chạy ở port ${PORT}`));});
 
 client.login(process.env.DISCORD_TOKEN);
 
