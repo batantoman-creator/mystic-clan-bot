@@ -14,18 +14,18 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-// ============ THÔNG TIN THẬT CỦA CLAN (SỬA THEO CLAN CỦA BẠN) ============
+// ============ THÔNG TIN THẬT CỦA CLAN ============
 const CLAN_INFO = `
 - Tên clan: Mystic Clan
-- Leader: [Neil và Hiếu]
-- Co-leader/Admin: [Hiroshims]
+- Leader: Neil và Hiếu
+- Co-leader/Admin: Hiroshims
 - Rule quan trọng: [ĐIỀN RULE CLAN NẾU CÓ]
 - Thông tin khác: [ĐIỀN THÊM NẾU CẦN]
 `;
 
 // ============ TRẢ LỜI CỐ ĐỊNH CHO CÂU HỎI QUAN TRỌNG (KHÔNG QUA AI, TRÁNH BỊA) ============
 const FAQ = [
-  { pattern: /leader|lãnh đạo|trưởng clan/i, answer: 'Leader clan Mystic Clan là [ĐIỀN TÊN LEADER]. Chấm hết, khỏi hỏi lại.' },
+  { pattern: /leader|lãnh đạo|trưởng clan/i, answer: 'Leader clan Mystic Clan là Neil và Hiếu. Chấm hết, khỏi hỏi lại.' },
   { pattern: /rule|luật|nội quy/i, answer: 'Rule clan: [ĐIỀN RULE Ở ĐÂY]. Đọc kỹ đi rồi hẵng hỏi lại tao.' },
 ];
 
@@ -107,6 +107,48 @@ client.on('messageCreate', async (message) => {
       try {
         const refMsg = await message.channel.messages.fetch(message.reference.messageId);
         if (refMsg?.content) quoted = `(Đang trả lời tin nhắn: "${refMsg.content}") `;
+      } catch (e) {}
+    }
+    content = quoted + content;
+
+    const faqAnswer = checkFAQ(content);
+    if (faqAnswer) {
+      await message.reply(faqAnswer);
+      pushHistory(message.channel.id, 'user', `${message.author.username}: ${content}`);
+      pushHistory(message.channel.id, 'assistant', faqAnswer);
+      return;
+    }
+
+    await message.channel.sendTyping();
+
+    pushHistory(message.channel.id, 'user', `${message.author.username}: ${content}`);
+
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...getHistory(message.channel.id),
+      ],
+      max_tokens: 220,
+      temperature: 0.6,
+    });
+
+    const reply = completion.choices?.[0]?.message?.content?.trim();
+    if (reply) {
+      await message.reply(reply.slice(0, 2000));
+      pushHistory(message.channel.id, 'assistant', reply);
+    }
+  } catch (err) {
+    console.error('Lỗi xử lý tin nhắn:', err);
+  }
+});
+
+client.login(process.env.DISCORD_TOKEN);
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Bot đang chạy!'));
+app.listen(PORT, () => console.log(`Web server chạy ở port ${PORT}`));        if (refMsg?.content) quoted = `(Đang trả lời tin nhắn: "${refMsg.content}") `;
       } catch (e) {}
     }
     content = quoted + content;
