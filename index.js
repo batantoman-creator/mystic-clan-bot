@@ -15,17 +15,24 @@ const client = new Client({
 });
 
 const SYSTEM_PROMPT = `Bạn là bot AI của clan "Mystic Clan" trên Discord.
-QUAN TRỌNG: luôn đọc kỹ và trả lời ĐÚNG trọng tâm câu hỏi/câu nói của người dùng trước, sau đó mới thêm chất hài hước/cà khịa nếu phù hợp.
-Tính cách: hài hước, lầy lội, dùng ngôn ngữ đời thường giới trẻ Việt Nam, nhưng câu trả lời phải mạch lạc, có logic, không nói lung tung.
-TUYỆT ĐỐI KHÔNG: phân biệt chủng tộc, tôn giáo, giới tính, ngoại hình ác ý, quấy rối, đe dọa, chính trị nhạy cảm.
-Trả lời ngắn gọn (1-3 câu), không dùng markdown.`;
+QUAN TRỌNG: luôn đọc kỹ và trả lời ĐÚNG trọng tâm câu nói của người dùng trước, sau đó mới thêm chất hài hước/cà khịa nếu phù hợp.
+Tính cách: lầy lội, gắt gỏng, sarcastic, sẵn sàng "đá xoáy" lại khi bị trêu hoặc bị chửi, dùng ngôn ngữ đời thường giới trẻ Việt Nam. Câu trả lời phải mạch lạc, có logic.
+QUY TẮC CỨNG:
+- Được dùng từ tục thật (đm, đcm, cc, vl kiểu chửi thề...). Được phép dùng từ lóng nhẹ, mỉa mai, ví von hài hước để "cà khịa" thay thế.
+- KHÔNG công kích ngoại hình, gia đình, giới tính, chủng tộc, tôn giáo của bất kỳ ai.
+- Nếu người dùng chửi thề/xúc phạm gắt, được phép đáp trả bằng giọng điệu tự tin, mỉa mai, "cợt nhả" thay vì im lặng, nhưng không lặp lại từ tục của họ.
+Trả lời đầy đủ (5-10 câu), không dùng markdown.`;
+
+// ==== Cấu hình trigger ====
+const PREFIX = '>bot';
+const KEYWORD = /\bbot\b/i; // gõ từ "bot" ở đâu trong câu cũng kích hoạt
 
 // ==== Cooldown chống spam ====
 const cooldown = new Map();
 const COOLDOWN_MS = 3000;
 
 // ==== Lịch sử hội thoại theo từng kênh ====
-const history = new Map(); // channelId -> mảng { role, content }
+const history = new Map();
 const MAX_HISTORY = 10;
 
 function getHistory(channelId) {
@@ -46,7 +53,13 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
   try {
     if (message.author.bot) return;
-    if (!message.mentions.has(client.user.id)) return;
+
+    const raw = message.content.trim();
+    const mentioned = message.mentions.has(client.user.id);
+    const usedPrefix = raw.toLowerCase().startsWith(PREFIX);
+    const usedKeyword = KEYWORD.test(raw);
+
+    if (!mentioned && !usedPrefix && !usedKeyword) return;
 
     // Chống spam theo từng user
     const now = Date.now();
@@ -54,11 +67,12 @@ client.on('messageCreate', async (message) => {
     if (now - last < COOLDOWN_MS) return;
     cooldown.set(message.author.id, now);
 
-    // Lấy nội dung, bỏ phần @mention
-    let content = message.content.replace(/<@!?(\d+)>/g, '').trim();
+    // Lấy nội dung sạch: bỏ mention, bỏ prefix nếu có
+    let content = raw.replace(/<@!?(\d+)>/g, '').trim();
+    if (usedPrefix) content = content.slice(PREFIX.length).trim();
     if (!content) return;
 
-    // Nếu người dùng reply vào 1 tin nhắn khác -> lấy thêm ngữ cảnh
+    // Ngữ cảnh nếu người dùng reply vào tin nhắn khác
     let quoted = '';
     if (message.reference) {
       try {
@@ -66,9 +80,7 @@ client.on('messageCreate', async (message) => {
         if (refMsg?.content) {
           quoted = `(Đang trả lời tin nhắn: "${refMsg.content}") `;
         }
-      } catch (e) {
-        // không fetch được thì bỏ qua, không chặn flow chính
-      }
+      } catch (e) {}
     }
     content = quoted + content;
 
@@ -83,7 +95,7 @@ client.on('messageCreate', async (message) => {
         ...getHistory(message.channel.id),
       ],
       max_tokens: 300,
-      temperature: 0.7,
+      temperature: 0.8,
     });
 
     const reply = completion.choices?.[0]?.message?.content?.trim();
@@ -98,7 +110,6 @@ client.on('messageCreate', async (message) => {
 
 client.login(process.env.DISCORD_TOKEN);
 
-// ==== Web server để Render + UptimeRobot ping giữ bot luôn thức ====
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('Bot đang chạy!'));
